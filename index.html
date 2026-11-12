@@ -9,7 +9,7 @@
   body { font-family: -apple-system, system-ui, sans-serif; background: #131117; color: #F1EDF6; margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; text-align: center; }
   .c { max-width: 360px; width: 100%; display: grid; gap: 14px; }
   h1 { font-size: 22px; margin: 0; }
-  p { margin: 0; color: #A39DAF; }
+  p { margin: 0; color: #A39DAF; overflow-wrap: anywhere; }
   a { display: block; padding: 16px; border-radius: 14px; background: #4FD1C5; color: #062320; font-weight: 700; text-decoration: none; font-size: 17px; }
 </style>
 </head>
@@ -22,41 +22,94 @@
 </div>
 <script>
   // Página-ponte do caixa da Unique Club.
-  // Ida:   ?valor=<centavos>&metodo=credit|debit&pedido=<id>  -> abre a InfinitePay já com o valor
-  // Volta: a InfinitePay chama esta página com order_id, nsu, aut... -> botão leva ao caixa com #ok-<id> ou #falhou-<id>
+  // Cartão (ida):  ?valor=<centavos>&metodo=credit|debit&pedido=<id>  -> abre o Tap to Pay da InfinitePay
+  // Cartão (volta): a InfinitePay devolve order_id, nsu, aut...
+  // Pix (ida):     ?modo=pix&valor=<centavos>&pedido=<id>&tag=<InfiniteTag> -> cria o checkout Pix da InfinitePay
+  // Pix (volta):   o checkout devolve order_nsu, slug, transaction_nsu, capture_method...
+  // Na volta, o botão leva ao caixa com #ok-<pedido> ou #falhou-<pedido>.
   const CAIXA = "https://claude.ai/artifact/Qs3zu5GcxDbzdcY951rZRS";
+  const API = "https://api.checkout.infinitepay.io";
+  const AQUI = location.origin + location.pathname;
   const q = new URLSearchParams(location.search);
   const el = (id) => document.getElementById(id);
   const limpa = (s) => String(s || "").replace(/[^A-Za-z0-9-]/g, "");
+  const reais = (c) => (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const guarda = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  const le = (k) => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
 
-  if (q.has("valor")) {
+  function voltar(ok, pedido, titulo, texto) {
+    el("t").textContent = titulo;
+    el("d").textContent = texto;
+    el("go").hidden = true;
+    el("volta").hidden = false;
+    el("volta").href = pedido ? CAIXA + "#" + (ok ? "ok-" : "falhou-") + pedido : CAIXA;
+  }
+  function acharUrl(obj) {
+    if (!obj || typeof obj !== "object") return "";
+    for (const k of ["url", "link", "checkout_url", "payment_url"]) if (typeof obj[k] === "string" && /^https?:\/\//.test(obj[k])) return obj[k];
+    for (const v of Object.values(obj)) { if (typeof v === "string" && /^https?:\/\//.test(v)) return v; if (v && typeof v === "object") { const u = acharUrl(v); if (u) return u; } }
+    return "";
+  }
+
+  if (q.get("modo") === "pix") {
+    // ---------- Pix pela InfinitePay (confirma sozinho)
+    const valor = parseInt(q.get("valor"), 10), pedido = limpa(q.get("pedido")), tag = String(q.get("tag") || "").replace(/^\$/, "").trim();
+    el("t").textContent = "Gerando o Pix…";
+    el("d").textContent = reais(valor);
+    el("go").hidden = true;
+    guarda("uc-tag", tag);
+    fetch(API + "/links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: tag, items: [{ description: "Comanda Unique Club", price: valor, quantity: 1 }], order_nsu: pedido, redirect_url: AQUI }),
+    })
+      .then((r) => r.text().then((t) => { let j = null; try { j = JSON.parse(t); } catch (e) {} return { ok: r.ok, j, t }; }))
+      .then(({ ok, j, t }) => {
+        const url = acharUrl(j);
+        if (!ok || !url) throw new Error((t || "").slice(0, 180) || "resposta vazia");
+        location.href = url;
+      })
+      .catch((e) => voltar(false, "", "Não deu para gerar o Pix pela InfinitePay", "Volte ao caixa e use o QR Code direto. Detalhe: " + e.message));
+  } else if (q.has("valor")) {
+    // ---------- Cartão por aproximação (Tap to Pay)
     const valor = parseInt(q.get("valor"), 10);
     const metodo = q.get("metodo") === "debit" ? "debit" : "credit";
     const pedido = limpa(q.get("pedido"));
     const p = new URLSearchParams({
-      amount: String(valor),
-      payment_method: metodo,
-      installments: "1",
-      order_id: pedido,
-      result_url: location.origin + location.pathname,
-      app_client_referrer: "UniqueClubBar",
-      af_force_deeplink: "true",
+      amount: String(valor), payment_method: metodo, installments: "1", order_id: pedido,
+      result_url: AQUI, app_client_referrer: "UniqueClubBar", af_force_deeplink: "true",
     });
     const link = "infinitepaydash://infinitetap-app?" + p.toString();
-    el("d").textContent = (valor / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) + " no " + (metodo === "debit" ? "débito" : "crédito");
+    el("d").textContent = reais(valor) + " no " + (metodo === "debit" ? "débito" : "crédito");
     el("go").href = link;
     setTimeout(() => { location.href = link; }, 300);
+  } else if (q.has("order_nsu")) {
+    // ---------- Volta do checkout Pix
+    const pedido = limpa(q.get("order_nsu"));
+    const corpo = { handle: le("uc-tag"), order_nsu: q.get("order_nsu"), transaction_nsu: q.get("transaction_nsu") || "", slug: q.get("slug") || "" };
+    el("t").textContent = "Conferindo o pagamento…";
+    el("go").hidden = true;
+    fetch(API + "/payment_check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j && j.paid) voltar(true, pedido, "Pix recebido ✅", "Toque abaixo para voltar ao caixa. A venda é registrada sozinha.");
+        else voltar(false, pedido, "Pix ainda não confirmado", "A InfinitePay não confirmou o pagamento. Confira no app antes de vender.");
+      })
+      .catch(() => {
+        // Sem resposta da conferência: o checkout só devolve para cá depois do pagamento, então vale o comprovante.
+        const tem = !!(q.get("transaction_nsu") && q.get("slug"));
+        if (tem) voltar(true, pedido, "Pix recebido ✅", "Toque abaixo para voltar ao caixa. A venda é registrada sozinha.");
+        else voltar(false, pedido, "Não deu para conferir o Pix", "Confira no app da InfinitePay antes de vender.");
+      });
   } else if (q.has("order_id")) {
+    // ---------- Volta do Tap to Pay
     const pedido = limpa(q.get("order_id"));
     const ok = !!q.get("nsu") && !!q.get("aut") && !q.get("warning");
-    el("t").textContent = ok ? "Pagamento aprovado ✅" : "Pagamento não aprovado";
-    el("d").textContent = ok ? "Toque abaixo para voltar ao caixa. A venda é registrada sozinha." : "Volte ao caixa e tente cobrar de novo.";
-    el("go").hidden = true;
-    el("volta").hidden = false;
-    el("volta").href = CAIXA + "#" + (ok ? "ok-" : "falhou-") + pedido;
+    voltar(ok, pedido, ok ? "Pagamento aprovado ✅" : "Pagamento não aprovado",
+      ok ? "Toque abaixo para voltar ao caixa. A venda é registrada sozinha." : "Volte ao caixa e tente cobrar de novo.");
   } else {
     el("t").textContent = "Página de apoio do caixa";
-    el("d").textContent = "Esta página é aberta pelo botão do caixa da Unique Club.";
+    el("d").textContent = "Esta página é aberta pelos botões do caixa da Unique Club.";
     el("go").hidden = true;
   }
 </script>
