@@ -28,6 +28,8 @@
   // Pix (volta):   o checkout devolve order_nsu, slug, transaction_nsu, capture_method...
   // Na volta, o botão leva ao caixa com #ok-<pedido> ou #falhou-<pedido>.
   const CAIXA = "https://claude.ai/artifact/Qs3zu5GcxDbzdcY951rZRS";
+  const QUEM_ME_DEVE = "https://claude.ai/artifact/FFKvy1E7uKfZvzAQyVWp1j";
+  const destino = (pedido) => (String(pedido).startsWith("qm") ? QUEM_ME_DEVE : CAIXA);
   const API = "https://api.checkout.infinitepay.io";
   const AQUI = location.origin + location.pathname;
   const q = new URLSearchParams(location.search);
@@ -42,7 +44,8 @@
     el("d").textContent = texto;
     el("go").hidden = true;
     el("volta").hidden = false;
-    el("volta").href = pedido ? CAIXA + "#" + (ok ? "ok-" : "falhou-") + pedido : CAIXA;
+    el("volta").href = pedido ? destino(pedido) + "#" + (ok ? "ok-" : "falhou-") + pedido : CAIXA;
+    el("volta").textContent = String(pedido).startsWith("qm") ? "Voltar para o Quem Me Deve" : "Voltar para o caixa";
   }
   function acharUrl(obj) {
     if (!obj || typeof obj !== "object") return "";
@@ -92,13 +95,13 @@
     fetch(API + "/payment_check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) })
       .then((r) => r.json())
       .then((j) => {
-        if (j && j.paid) voltar(true, pedido, "Pix recebido ✅", "Toque abaixo para voltar ao caixa. A venda é registrada sozinha.");
+        if (j && j.paid) voltar(true, pedido, "Pix recebido ✅", "Toque abaixo para voltar. O pagamento é registrado sozinho.");
         else voltar(false, pedido, "Pix ainda não confirmado", "A InfinitePay não confirmou o pagamento. Confira no app antes de vender.");
       })
       .catch(() => {
         // Sem resposta da conferência: o checkout só devolve para cá depois do pagamento, então vale o comprovante.
         const tem = !!(q.get("transaction_nsu") && q.get("slug"));
-        if (tem) voltar(true, pedido, "Pix recebido ✅", "Toque abaixo para voltar ao caixa. A venda é registrada sozinha.");
+        if (tem) voltar(true, pedido, "Pix recebido ✅", "Toque abaixo para voltar. O pagamento é registrado sozinho.");
         else voltar(false, pedido, "Não deu para conferir o Pix", "Confira no app da InfinitePay antes de vender.");
       });
   } else if (q.has("order_id")) {
@@ -106,7 +109,7 @@
     const pedido = limpa(q.get("order_id"));
     const ok = !!q.get("nsu") && !!q.get("aut") && !q.get("warning");
     voltar(ok, pedido, ok ? "Pagamento aprovado ✅" : "Pagamento não aprovado",
-      ok ? "Toque abaixo para voltar ao caixa. A venda é registrada sozinha." : "Volte ao caixa e tente cobrar de novo.");
+      ok ? "Toque abaixo para voltar. O pagamento é registrado sozinho." : "Volte ao caixa e tente cobrar de novo.");
   } else {
     el("t").textContent = "Página de apoio do caixa";
     el("d").textContent = "Esta página é aberta pelos botões do caixa da Unique Club.";
