@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Caixa Unique Club · InfinitePay</title>
+<style>
+  [hidden] { display: none !important; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #131117; color: #F1EDF6; margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; text-align: center; }
+  .c { max-width: 360px; width: 100%; display: grid; gap: 14px; }
+  h1 { font-size: 22px; margin: 0; }
+  p { margin: 0; color: #A39DAF; }
+  a { display: block; padding: 16px; border-radius: 14px; background: #4FD1C5; color: #062320; font-weight: 700; text-decoration: none; font-size: 17px; }
+</style>
+</head>
+<body>
+<div class="c">
+  <h1 id="t">Abrindo a InfinitePay…</h1>
+  <p id="d"></p>
+  <a id="go" href="#">Abrir InfinitePay</a>
+  <a id="volta" href="#" hidden>Voltar para o caixa</a>
+</div>
+<script>
+  // Página-ponte do caixa da Unique Club.
+  // Ida:   ?valor=<centavos>&metodo=credit|debit&pedido=<id>  -> abre a InfinitePay já com o valor
+  // Volta: a InfinitePay chama esta página com order_id, nsu, aut... -> botão leva ao caixa com #ok-<id> ou #falhou-<id>
+  const CAIXA = "https://claude.ai/artifact/Qs3zu5GcxDbzdcY951rZRS";
+  const q = new URLSearchParams(location.search);
+  const el = (id) => document.getElementById(id);
+  const limpa = (s) => String(s || "").replace(/[^A-Za-z0-9-]/g, "");
+
+  if (q.has("valor")) {
+    const valor = parseInt(q.get("valor"), 10);
+    const metodo = q.get("metodo") === "debit" ? "debit" : "credit";
+    const pedido = limpa(q.get("pedido"));
+    const p = new URLSearchParams({
+      amount: String(valor),
+      payment_method: metodo,
+      installments: "1",
+      order_id: pedido,
+      result_url: location.origin + location.pathname,
+      app_client_referrer: "UniqueClubBar",
+      af_force_deeplink: "true",
+    });
+    const link = "infinitepaydash://infinitetap-app?" + p.toString();
+    el("d").textContent = (valor / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) + " no " + (metodo === "debit" ? "débito" : "crédito");
+    el("go").href = link;
+    setTimeout(() => { location.href = link; }, 300);
+  } else if (q.has("order_id")) {
+    const pedido = limpa(q.get("order_id"));
+    const ok = !!q.get("nsu") && !!q.get("aut") && !q.get("warning");
+    el("t").textContent = ok ? "Pagamento aprovado ✅" : "Pagamento não aprovado";
+    el("d").textContent = ok ? "Toque abaixo para voltar ao caixa. A venda é registrada sozinha." : "Volte ao caixa e tente cobrar de novo.";
+    el("go").hidden = true;
+    el("volta").hidden = false;
+    el("volta").href = CAIXA + "#" + (ok ? "ok-" : "falhou-") + pedido;
+  } else {
+    el("t").textContent = "Página de apoio do caixa";
+    el("d").textContent = "Esta página é aberta pelo botão do caixa da Unique Club.";
+    el("go").hidden = true;
+  }
+</script>
+</body>
+</html>
